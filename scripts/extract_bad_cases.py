@@ -4,61 +4,73 @@ import argparse
 import pandas as pd
 from tqdm import tqdm
 import sys
+import glob
+import shutil
 
 # Add vlmeval to path so we can import smp
 sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), '..')))
-from vlmeval.smp import load, decode_base64_to_image_file, ls
+try:
+    from vlmeval.smp import load, decode_base64_to_image_file, ls
+except ImportError:
+    print("Could not import vlmeval. Please make sure you run this from the project root or vlmeval is installed.")
+    sys.exit(1)
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Extract bad cases (incorrect predictions) from VLMEvalKit results.')
-    parser.add_argument('result_file', type=str, help='Path to the evaluation result file (e.g. *result.pkl or .xlsx)')
-    parser.add_argument('--out-dir', type=str, default='bad_cases', help='Output directory for bad cases')
+    parser = argparse.ArgumentParser(description='Extract bad and good cases from VLMEvalKit results.')
+    parser.add_argument('result_file', type=str, nargs='?', default=None, 
+                        help='Path to the evaluation result file (e.g. *result.pkl or .xlsx). If not provided, will auto-detect.')
+    parser.add_argument('--model', type=str, default='LLaVA-OneVision-7B', help='Model name for auto-detecting result file')
+    parser.add_argument('--dataset', type=str, default='MMBench', help='Dataset name for auto-detecting result file')
+    parser.add_argument('--out-dir', type=str, default='extracted_cases', help='Output base directory')
     parser.add_argument('--category-col', type=str, default='category', help='Column name to group by (e.g. category, l2-category)')
     return parser.parse_args()
 
-def main():
-    args = parse_args()
-    if not osp.exists(args.result_file):
-        print(f"Result file {args.result_file} does not exist.")
+def find_result_file(model, dataset, base_dir='.'):
+    # Try common VLMEvalKit output paths
+    search_patterns = [
+        osp.join(base_dir, f"outputs/{model}/{model}_{dataset}*.xlsx"),
+        osp.join(base_dir, f"outputs/{model}/{model}_{dataset}*.csv"),
+        osp.join(base_dir, f"outputs/{model}/{model}*{dataset}*.xlsx")
+    ]
+    for pattern in search_patterns:
+        files = glob.glob(pattern)
+        if files:
+            # Prefer the one with 'result' if multiple
+            res_files = [f for f in files if 'result' in f]
+            return res_files[0] if res_files else files[0]
+            
+    # Try searching anywhere in outputs
+    all_files = glob.glob(osp.join(base_dir, f"outputs/**/*{model}*{dataset}*.*"), recursive=True)
+    valid_files = [f for f in all_files if f.endswith('.xlsx') or f.endswith('.pkl')]
+    if valid_files:
+        return valid_files[0]
+        
+    return None
+
+def process_cases(cases_df, out_base_dir, case_type, args):
+    if len(cases_df) == 0:
+        print(f"No {case_type} found!")
         return
 
-    print(f"Loading {args.result_file} ...")
-    data = load(args.result_file)
-    
-    # Identify incorrect predictions
-    if 'hit' in data.columns:
-        bad_cases = data[data['hit'] == 0].copy()
-    else:
-        # Fallback if hit is not present
-        if 'prediction' in data.columns and 'answer' in data.columns:
-            bad_cases = data[data['prediction'].astype(str).str.strip().str.upper() != data['answer'].astype(str).str.strip().str.upper()].copy()
-        else:
-            print("Cannot find 'hit' or 'prediction'/'answer' columns to determine correctness.")
-            return
-            
-    print(f"Total bad cases found: {len(bad_cases)} out of {len(data)}")
-    if len(bad_cases) == 0:
-        print("No bad cases found! The model might be 100% accurate on this subset or the criteria failed.")
-        return
-    
     cat_col = args.category_col
-    if cat_col not in bad_cases.columns:
-        print(f"Warning: column '{cat_col}' not found. Grouping all into 'All_Categories'.")
-        bad_cases['category_group'] = 'All_Categories'
+    if cat_col not in cases_df.columns:
+        print(f"Warning: column '{cat_col}' not found. Grouping {case_type} into 'All_Categories'.")
+        cases_df['category_group'] = 'All_Categories'
         cat_col = 'category_group'
-        
-    os.makedirs(args.out_dir, exist_ok=True)
-    report_md = f"# Bad Case Analysis: {osp.basename(args.result_file)}\n\n"
+
+    case_out_dir = osp.join(out_base_dir, case_type)
+    os.makedirs(case_out_dir, exist_ok=True)
+    report_md = f"# {case_type.replace('_', ' ').title()} Analysis\n\n"
     
-    groups = bad_cases.groupby(cat_col)
+    groups = cases_df.groupby(cat_col)
     for cat, group in groups:
         cat_name = str(cat).replace('/', '_').replace(' ', '_')
-        cat_dir = osp.join(args.out_dir, cat_name)
+        cat_dir = osp.join(case_out_dir, cat_name)
         os.makedirs(cat_dir, exist_ok=True)
         
-        report_md += f"## Category: {cat_name} ({len(group)} errors)\n\n"
+        report_md += f"## Category: {cat_name} ({len(group)} items)\n\n"
         
-        for i, row in tqdm(group.iterrows(), total=len(group), desc=f"Processing {cat_name}"):
+        for i, row in tqdm(group.iterrows(), total=len(group), desc=f"Processing {case_type} -> {cat_name}"):
             idx = row.get('index', i)
             
             # Dump image
@@ -67,16 +79,21 @@ def main():
                 img_b64 = row['image']
                 if isinstance(img_b64, str) and len(img_b64) > 64:
                     img_path = osp.join(cat_dir, f"{idx}.jpg")
-                    decode_base64_to_image_file(img_b64, img_path)
-                    img_rel_paths.append(osp.relpath(img_path, args.out_dir))
+                    try:
+                        decode_base64_to_image_file(img_b64, img_path)
+                        img_rel_paths.append(osp.relpath(img_path, out_base_dir))
+                    except Exception as e:
+                        pass
             elif 'image_path' in row and pd.notna(row['image_path']):
                 # If images are stored as paths instead of base64
                 img_path = str(row['image_path'])
                 if osp.exists(img_path):
-                    import shutil
-                    dest_path = osp.join(cat_dir, osp.basename(img_path))
-                    shutil.copy(img_path, dest_path)
-                    img_rel_paths.append(osp.relpath(dest_path, args.out_dir))
+                    dest_path = osp.join(cat_dir, f"{idx}_{osp.basename(img_path)}")
+                    try:
+                        shutil.copy(img_path, dest_path)
+                        img_rel_paths.append(osp.relpath(dest_path, out_base_dir))
+                    except Exception as e:
+                        pass
             
             # Options
             options = []
@@ -98,11 +115,59 @@ def main():
                 report_md += f"<details><summary><b>Model Output Log</b></summary>\n\n```\n{row['log']}\n```\n</details>\n\n"
             report_md += "---\n\n"
             
-    report_path = osp.join(args.out_dir, 'bad_case_report.md')
+    report_path = osp.join(out_base_dir, f'{case_type}_report.md')
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(report_md)
         
-    print(f"Bad cases extracted and report generated at {report_path}")
+    print(f"[{case_type}] extracted and categorized. Report generated at {report_path}")
+
+def main():
+    args = parse_args()
+    
+    # Auto-detect result file if not provided
+    result_file = args.result_file
+    if not result_file:
+        print(f"Result file not provided via arguments. Auto-detecting for Model: {args.model}, Dataset: {args.dataset}...")
+        project_root = osp.abspath(osp.join(osp.dirname(__file__), '..'))
+        result_file = find_result_file(args.model, args.dataset, base_dir=project_root)
+        
+    if not result_file or not osp.exists(result_file):
+        print(f"Error: Could not find a valid result file for model {args.model} and dataset {args.dataset}.")
+        print("Please provide the file path manually: python extract_cases.py /path/to/result.xlsx")
+        return
+
+    print(f"Loading {result_file} ...")
+    try:
+        data = load(result_file)
+    except Exception as e:
+        print(f"Error loading {result_file}: {e}")
+        return
+        
+    print(f"Total entries loaded: {len(data)}")
+    
+    # Identify correctness
+    if 'hit' in data.columns:
+        bad_cases = data[data['hit'] == 0].copy()
+        good_cases = data[data['hit'] == 1].copy()
+    else:
+        # Fallback if hit is not present
+        if 'prediction' in data.columns and 'answer' in data.columns:
+            is_correct = data['prediction'].astype(str).str.strip().str.upper() == data['answer'].astype(str).str.strip().str.upper()
+            bad_cases = data[~is_correct].copy()
+            good_cases = data[is_correct].copy()
+        else:
+            print("Warning: Cannot find 'hit' or 'prediction'/'answer' columns to determine correctness.")
+            bad_cases = pd.DataFrame()
+            good_cases = data.copy()
+            
+    print(f"Categorizing {len(bad_cases)} bad cases and {len(good_cases)} good cases based on column '{args.category_col}'.")
+    
+    os.makedirs(args.out_dir, exist_ok=True)
+    
+    if len(bad_cases) > 0:
+        process_cases(bad_cases, args.out_dir, "bad_cases", args)
+    if len(good_cases) > 0:
+        process_cases(good_cases, args.out_dir, "good_cases", args)
 
 if __name__ == '__main__':
     main()
