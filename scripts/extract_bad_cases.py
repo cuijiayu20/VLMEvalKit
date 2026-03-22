@@ -21,7 +21,7 @@ def parse_args():
                         help='Path to the evaluation result file (e.g. *result.pkl or .xlsx). If not provided, will auto-detect.')
     parser.add_argument('--model', type=str, default='LLaVA-OneVision-7B', help='Model name for auto-detecting result file')
     parser.add_argument('--dataset', type=str, default='MMBench', help='Dataset name for auto-detecting result file')
-    parser.add_argument('--out-dir', type=str, default='extracted_cases', help='Output base directory')
+    parser.add_argument('--out-dir', type=str, default=None, help='Output base directory (defaults to extracted_cases in the result file directory)')
     parser.add_argument('--category-col', type=str, default='category', help='Column name to group by (e.g. category, l2-category)')
     return parser.parse_args()
 
@@ -142,6 +142,10 @@ def main():
     except Exception as e:
         print(f"Error loading {result_file}: {e}")
         return
+        
+    if not args.out_dir:
+        args.out_dir = osp.join(osp.dirname(result_file), 'extracted_cases')
+        print(f"Output directory automatically set to: {args.out_dir}")
         
     print(f"Total entries loaded: {len(data)}")
     
