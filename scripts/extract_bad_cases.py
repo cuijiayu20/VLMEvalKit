@@ -149,6 +149,20 @@ def main():
         
     print(f"Total entries loaded: {len(data)}")
     
+    # Try to load the original dataset to fetch the base64 images (since they 
+    # are usually omitted in the result xlsx files to save space)
+    try:
+        from vlmeval.dataset import build_dataset
+        dataset_obj = build_dataset(args.dataset)
+        original_data = dataset_obj.data
+        if not original_data.empty and 'image' in original_data.columns and 'index' in original_data.columns:
+            if 'image' in data.columns:
+                data = data.drop(columns=['image'])
+            data = data.merge(original_data[['index', 'image']], on='index', how='left')
+            print(f"Successfully fetched original images from dataset '{args.dataset}'.")
+    except Exception as e:
+        print(f"Warning: Could not fetch original images from dataset {args.dataset}. ({e})")
+    
     # Identify correctness
     if 'hit' in data.columns:
         bad_cases = data[data['hit'] == 0].copy()
