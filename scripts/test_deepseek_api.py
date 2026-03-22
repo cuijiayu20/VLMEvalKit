@@ -1,20 +1,47 @@
 """
 DeepSeek API 连通性测试脚本
 用法：
-  1. 先设置环境变量：
-     export OPENAI_API_KEY="sk-你的deepseek的key"
-     export OPENAI_API_BASE="https://api.deepseek.com/v1/chat/completions"
-     export LOCAL_LLM="deepseek-chat"
+  1. 在项目根目录的 .env 文件中配置：
+     OPENAI_API_KEY=sk-你的deepseek的key
+     OPENAI_API_BASE=https://api.deepseek.com/v1/chat/completions
+     LOCAL_LLM=deepseek-chat
   2. 运行本脚本：
      python scripts/test_deepseek_api.py
 """
 import os
+import os.path as osp
 import sys
 import json
 import requests
 
+# Add vlmeval to path
+sys.path.append(osp.abspath(osp.join(osp.dirname(__file__), '..')))
+
+def load_env_file():
+    """从项目根目录的 .env 文件加载环境变量"""
+    project_root = osp.abspath(osp.join(osp.dirname(__file__), '..'))
+    env_path = osp.join(project_root, '.env')
+    if osp.exists(env_path):
+        print(f"📄 正在从 {env_path} 加载配置...")
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' in line:
+                    key, _, value = line.partition('=')
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    os.environ[key] = value
+        print("✅ .env 文件加载完成")
+    else:
+        print(f"⚠️  未找到 .env 文件: {env_path}，将使用已有的环境变量。")
+
 def test_raw_request():
     """直接用 requests 测试 DeepSeek API"""
+    # 先加载 .env 文件
+    load_env_file()
+
     api_key = os.environ.get('OPENAI_API_KEY', '')
     api_base = os.environ.get('OPENAI_API_BASE', '')
     model = os.environ.get('LOCAL_LLM', 'deepseek-chat')
