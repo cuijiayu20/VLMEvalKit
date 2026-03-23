@@ -22,8 +22,14 @@ from vlmeval.config import supported_VLM
 # MMBench 1004 题原图路径 (在服务器上的位置)
 IMAGE_PATH = '/root/LMUData/images/MMBench/3001004.png'
 
-# 基础问题
-BASE_QUESTION = "Where is the sheep?\nA. behind the car\nB. in front of the car\nC. on the right of the car\nD. on the left of the car"
+# 基础问题格式 (严格对齐 MMBench Prompt 风格)
+BASE_PROMPT = """Question: Where is the sheep?
+Options:
+A. The sheep is behind the car
+B. The sheep is in the front of the car
+C. The sheep is on the right of the car
+D. The sheep is on the left of the car
+Please select the correct answer from the options above."""
 
 # 实验条件定义
 CONDITIONS = [
@@ -33,7 +39,7 @@ CONDITIONS = [
         'type': 'image_text',
         'use_image': True,
         'image_modifier': None,
-        'prompt': BASE_QUESTION,
+        'prompt': BASE_PROMPT,
     },
     
     # --- 条件2：纯文本（测试 LLM 空间推理）---
@@ -41,22 +47,22 @@ CONDITIONS = [
         'id': 'C2_L1',
         'name': '无图纯文本_粗略描述',
         'type': 'text_only',
-        'use_image': False,
-        'prompt': "Scenario: A sheep is standing on a road. A car is behind the sheep.\n\nQuestion: " + BASE_QUESTION,
+        'use_image': False, # 现在用 dummy_image 替代
+        'prompt': "Hint: A sheep is standing on a road. A car is behind the sheep.\n" + BASE_PROMPT,
     },
     {
         'id': 'C2_L2',
         'name': '无图纯文本_中等描述',
         'type': 'text_only',
         'use_image': False,
-        'prompt': "Scenario: A white sheep is standing in the middle of a road, facing the camera. A gray car is behind the sheep, facing the same direction as the camera view.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: A white sheep is standing in the middle of a road, facing the camera. A gray car is behind the sheep, facing the same direction as the camera view.\n" + BASE_PROMPT,
     },
     {
         'id': 'C2_L3',
         'name': '无图纯文本_详细描述',
         'type': 'text_only',
         'use_image': False,
-        'prompt': "Scenario: In this photo taken from the front, a white sheep stands on the road in the foreground, directly facing the camera. Behind the sheep, further down the road, there is a gray car. The car's front is visible, indicating it is facing the sheep (and the camera). The sheep is positioned between the camera and the car.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: In this photo taken from the front, a white sheep stands on the road in the foreground, directly facing the camera. Behind the sheep, further down the road, there is a gray car. The car's front is visible, indicating it is facing the sheep (and the camera). The sheep is positioned between the camera and the car.\n" + BASE_PROMPT,
     },
 
     # --- 条件3：图像 + 补充文本（扶视觉编码器一把）---
@@ -65,21 +71,21 @@ CONDITIONS = [
         'name': '有图+弱提示',
         'type': 'image_text',
         'use_image': True,
-        'prompt': "Note: The sheep is closer to the camera than the car.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: The sheep is closer to the camera than the car.\n" + BASE_PROMPT,
     },
     {
         'id': 'C3_H2',
         'name': '有图+中提示',
         'type': 'image_text',
         'use_image': True,
-        'prompt': "Hint: In this image, the sheep is in the foreground and the car is in the background.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: In this image, the sheep is in the foreground and the car is in the background.\n" + BASE_PROMPT,
     },
     {
         'id': 'C3_H3',
         'name': '有图+强提示',
         'type': 'image_text',
         'use_image': True,
-        'prompt': "Spatial context: The sheep is standing in front of the car. The sheep is closer to the viewer, and the car is further away behind the sheep.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: Spatial context: The sheep is standing in front of the car. The sheep is closer to the viewer, and the car is further away behind the sheep.\n" + BASE_PROMPT,
     },
 
     # --- 条件4：图像 + 深度信息（验证深度假说）---
@@ -88,14 +94,14 @@ CONDITIONS = [
         'name': '有图+绝对距离描述',
         'type': 'image_text',
         'use_image': True,
-        'prompt': "Depth information: The sheep is approximately 5 meters from the camera. The car is approximately 15 meters from the camera.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: Depth information - The sheep is approximately 5 meters from the camera. The car is approximately 15 meters from the camera.\n" + BASE_PROMPT,
     },
     {
         'id': 'C4_D2',
         'name': '有图+相对比例描述',
         'type': 'image_text',
         'use_image': True,
-        'prompt': "Depth hint: The sheep occupies about 30% of the image height, while the car occupies about 20% of the image height despite being a larger object in reality.\n\nQuestion: " + BASE_QUESTION,
+        'prompt': "Hint: Depth hint - The sheep occupies about 30% of the image height, while the car occupies about 20% of the image height despite being a larger object in reality.\n" + BASE_PROMPT,
     },
 
     # --- 条件5：增强视觉线索（修改图片）---
@@ -105,10 +111,18 @@ CONDITIONS = [
         'type': 'image_text',
         'use_image': True,
         'image_modifier': 'draw_boxes_and_text',
-        'prompt': BASE_QUESTION,
+        'prompt': BASE_PROMPT,
     },
 ]
 
+def get_dummy_image(out_dir):
+    """生成一张纯黑的 10x10 图片作为无图条件的输入，避免 pipeline 崩溃"""
+    path = os.path.join(out_dir, "dummy_black.jpg")
+    if not os.path.exists(path):
+        os.makedirs(out_dir, exist_ok=True)
+        img = Image.new('RGB', (10, 10), color=(0, 0, 0))
+        img.save(path)
+    return path
 
 def modify_image_with_annotations(img_path, out_dir):
     """在图上画框和文字标注（条件 5）"""
@@ -151,7 +165,7 @@ def modify_image_with_annotations(img_path, out_dir):
     return out_path
 
 
-def build_message(condition, img_path, annotated_img_path):
+def build_message(condition, img_path, annotated_img_path, dummy_img_path):
     """构建输入给模型的 message"""
     msg = []
     
@@ -163,10 +177,12 @@ def build_message(condition, img_path, annotated_img_path):
         else:
             print(f"警告：找不到图片 {img_path}，跳过此条件")
             return None
+    else:
+        # 必须提供 dummy 图片以避免报错
+        msg.append({'type': 'image', 'value': dummy_img_path})
             
     msg.append({'type': 'text', 'value': condition['prompt']})
     return msg
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -192,6 +208,8 @@ def main():
 
     # 准备修改后的图片 (用于条件 5)
     annotated_img_path = modify_image_with_annotations(IMAGE_PATH, args.out_dir)
+    # 准备 dummy 图片 (用于条件 2)
+    dummy_img_path = get_dummy_image(args.out_dir)
 
     results = []
 
@@ -199,7 +217,7 @@ def main():
     for cond in CONDITIONS:
         print(f"运行条件: [{cond['id']}] {cond['name']}")
         
-        msg = build_message(cond, IMAGE_PATH, annotated_img_path)
+        msg = build_message(cond, IMAGE_PATH, annotated_img_path, dummy_img_path)
         if msg is None:
             continue
             
