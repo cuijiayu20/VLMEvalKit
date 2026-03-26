@@ -85,8 +85,17 @@ def extract_full_attention(model, processor, image, messages, target_word):
     return target_attn_tensor
 
 def main():
-    # 直接加载本地在 /models/llava-ov-7b 下的模型权重
-    model_id = "/models/llava-ov-7b"
+    # HuggingFace 报错 Repo ID 格式错误，其根本原因是因为它在本地硬盘上“找不到这个目录”，所以误以为你输入的是线上 Repo 名字。
+    # 结合你之前的描述，真正的绝对路径应该是 /root/models/llava-ov-7b
+    model_id = "/root/models/llava-ov-7b"
+    
+    import os
+    if not os.path.exists(model_id):
+        print(f"【路径错误】在容器中找不到文件夹: {model_id}")
+        print("因为 HuggingFace 找不到本地文件夹，所以报错了 Repo id 格式错误。")
+        print("请在终端运行命令 `ls -l /root/models/llava-ov-7b` 确认文件夹存在！")
+        return
+        
     print(f"Loading Model from local path: {model_id} ...")
     try:
         processor = AutoProcessor.from_pretrained(model_id)
