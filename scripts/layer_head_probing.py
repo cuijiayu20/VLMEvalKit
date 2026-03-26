@@ -42,7 +42,7 @@ def extract_full_attention(model, processor, image, messages, target_word):
     with torch.no_grad():
         outputs = model(**inputs, output_attentions=True)
         
-    attentions = outputs.language_model.attentions
+    attentions = outputs.attentions 
     seq_len = attentions[0].shape[-1]
     input_len = input_ids.shape[0]
     
@@ -99,7 +99,13 @@ def main():
     print(f"Loading Model from local path: {model_id} ...")
     try:
         processor = AutoProcessor.from_pretrained(model_id)
-        model = LlavaOnevisionForConditionalGeneration.from_pretrained(model_id, device_map="auto", torch_dtype=torch.float16)
+        # 强制设置 attn_implementation="eager"，因为默认的 sdpa 模式为了省显存会丢弃 attention 矩阵
+        model = LlavaOnevisionForConditionalGeneration.from_pretrained(
+            model_id, 
+            device_map="auto", 
+            torch_dtype=torch.float16,
+            attn_implementation="eager"
+        )
     except Exception as e:
         print(f"无法加载模型，请检查环境: {e}")
         return
