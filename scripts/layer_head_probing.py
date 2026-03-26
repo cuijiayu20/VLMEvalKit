@@ -179,7 +179,7 @@ def main():
         # 为了稳定运行多张图片，每跑完一张立即释放 GPU 显存
         import gc
         del attn_tensor
-        del all_layers_attn 
+        del attn_2d
         gc.collect()
         torch.cuda.empty_cache()
         
