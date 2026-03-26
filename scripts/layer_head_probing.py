@@ -16,7 +16,9 @@ def generate_synthetic_batch(batch_size=3):
     """
     dataset = []
     for i in range(batch_size):
-        img = Image.new('RGB', (400, 400), color=(255, 255, 255))
+        # 强制将原图生成为 384x384 (SigLip 的基础感知尺寸)
+        # 防止因哪怕大一点点 (400x400) 就触发 LLaVA-OV AnyRes 的过度切图导致爆显存
+        img = Image.new('RGB', (384, 384), color=(255, 255, 255))
         d = ImageDraw.Draw(img)
         # 在左上角添加一个显眼的红色特征区域
         d.rectangle([10, 10, 120, 120], fill=(255, 0, 0))
@@ -120,7 +122,16 @@ def main():
     
     for idx, sample in enumerate(dataset):
         print(f"\n正在处理样本 {idx}...")
-        image = Image.open(sample["image_path"]).convert("RGB")
+        
+        # ==========================================================
+        # ★★★ 彻底解决 OOM 的核心防护：规避 AnyRes 爆炸机制 ★★★
+        # 读取并在传入 Processor 之前强行将图像降阶至 384x384。
+        # 只有这样，才能强制模型只提取 1 个 Global Patch（合 729 个 visual tokens）。
+        # 此前 400x400 的图片因为长宽超过阈值，被它强行切分成了一个 2x2 网格，
+        # 视觉 token 总数生生翻了 5 倍涨到 3645！在 Eager 模式下强行还原并抛出这重达 20GB+ 
+        # 的超巨型注意力张量给加速层 (Accelerator) 分发时，你的 3090 显卡就瞬间炸了。
+        # ==========================================================
+        image = Image.open(sample["image_path"]).convert("RGB").resize((384, 384))
         
         # 2. 提取【每一层】【每个头】的 Attention Weight
         attn_tensor = extract_full_attention(model, processor, image, sample["messages"], sample["target_word"])
