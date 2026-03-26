@@ -75,12 +75,14 @@ def extract_full_attention(model, processor, image, messages, target_word):
         if target_idx_in_input > original_image_idx:
             target_idx_in_attn = target_idx_in_input - 1 + num_visual_tokens
             
-    # 取出所有层的 Attention 列表转为 Tensor，形状: [层数, batch_size, 独立Head数, seq_len, seq_len]
-    all_layers_attn = torch.stack(attentions) 
+    # 为了防止多层巨大的 Attention 矩阵在单张显卡上瞬间堆积导致 24GB 显存 OOM
+    # 先将每一层的 Attention 卸载到 CPU 内存上，并且为了绘图保险转换为 float32，然后再 Stack
+    cpu_attentions = [layer_attn.cpu().to(torch.float32) for layer_attn in attentions]
+    all_layers_attn = torch.stack(cpu_attentions) 
     
     # 切片提取指定的文本 token 到所有视觉 token 的 attention 
     # 结果形状应为: [层数, 独立Head数, 视觉Tokens数量]
-    target_attn_tensor = all_layers_attn[:, 0, :, target_idx_in_attn, vis_start:vis_end].cpu().numpy().astype(np.float32)
+    target_attn_tensor = all_layers_attn[:, 0, :, target_idx_in_attn, vis_start:vis_end].numpy()
     
     return target_attn_tensor
 
@@ -99,10 +101,12 @@ def main():
     print(f"Loading Model from local path: {model_id} ...")
     try:
         processor = AutoProcessor.from_pretrained(model_id)
-        # 强制设置 attn_implementation="eager"，因为默认的 sdpa 模式为了省显存会丢弃 attention 矩阵
+        # 采用多 GPU 均衡分配策略 (balanced)：给主卡 (0卡) 限制一个安全的加载显存，
+        # 强制将大量静态模型权重分配到副卡 (1卡)，以保证主卡有足够的显存用来存放 Forward Pass 的激活动态张量
         model = LlavaOnevisionForConditionalGeneration.from_pretrained(
             model_id, 
-            device_map="auto", 
+            device_map="balanced", 
+            max_memory={0: "14GiB", 1: "23GiB"},
             torch_dtype=torch.float16,
             attn_implementation="eager"
         )
@@ -160,6 +164,13 @@ def main():
         tensor_path = os.path.join(OUTPUT_DIR, f"attn_tensor_sample_{idx}.npy")
         np.save(tensor_path, attn_2d)
         print(f"原始特征矩阵(Shape: {num_layers}x{num_heads}x{grid_size}x{grid_size})已保存至: {tensor_path}")
+        
+        # 为了稳定运行多张图片，每跑完一张立即释放 GPU 显存
+        import gc
+        del attn_tensor
+        del all_layers_attn 
+        gc.collect()
+        torch.cuda.empty_cache()
         
 if __name__ == "__main__":
     main()
