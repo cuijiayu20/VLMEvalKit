@@ -9,27 +9,36 @@ from PIL import Image, ImageDraw
 OUTPUT_DIR = r"/root/VLMEvalKit/outputs/probing_results"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def generate_synthetic_batch(batch_size=3):
+def generate_synthetic_batch():
     """
-    构造一批明确指向特定空间区域的测试样本 (Batch)
-    这里生成背景白色的图片，在左上角放置明显的红色方块，并构造 Prompt
+    构造完美对比消融实验 (Ablation Study)：
+    所有的 Prompt 对应完全一模一样的同一张图片（只有左上角有红色方块）。
+    分别测试三种空间特征探查。
     """
     dataset = []
-    for i in range(batch_size):
-        # 强制将原图生成为 384x384 (SigLip 的基础感知尺寸)
-        # 防止因哪怕大一点点 (400x400) 就触发 LLaVA-OV AnyRes 的过度切图导致爆显存
-        img = Image.new('RGB', (384, 384), color=(255, 255, 255))
-        d = ImageDraw.Draw(img)
-        # 在左上角添加一个显眼的红色特征区域
-        d.rectangle([10, 10, 120, 120], fill=(255, 0, 0))
-        path = os.path.join(OUTPUT_DIR, f"synthetic_sample_{i}.jpg")
-        img.save(path)
-        
-        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": "请描述图片左上角的物体"}]}]
+    
+    # 1. 统一生成唯一个基准参照图：底图全白，仅在左上角有红色方块
+    img = Image.new('RGB', (384, 384), color=(255, 255, 255))
+    d = ImageDraw.Draw(img)
+    d.rectangle([10, 10, 120, 120], fill=(255, 0, 0))
+    path = os.path.join(OUTPUT_DIR, "synthetic_baseline_image.jpg")
+    img.save(path)
+    
+    # 2. 构造三个对照组的变量条件 (Prompt 与 监测的目标 Token)
+    conditions = [
+        {"prompt": "请描述图片左上角是什么？", "target": "左"},
+        {"prompt": "请描述这张图像是什么？", "target": "图"},
+        {"prompt": "请描述图片右下角是什么？", "target": "右"}
+    ]
+    
+    for idx, cond in enumerate(conditions):
+        messages = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": cond["prompt"]}]}]
         dataset.append({
+            "sample_id": idx,
             "image_path": path, 
             "messages": messages, 
-            "target_word": "左"
+            "target_word": cond["target"],
+            "condition_name": cond["target"] # 用作保存文件名的标识后缀
         })
     return dataset
 
@@ -116,12 +125,16 @@ def main():
         print(f"无法加载模型，请检查环境: {e}")
         return
         
-    # 1. 构造一批样本 (Batch Data)
-    dataset = generate_synthetic_batch(batch_size=2)
-    print(f"已构造测试样本批次，总共 {len(dataset)} 个。")
+    # 1. 构造三组打标好的对比样本 (Batch Data)
+    dataset = generate_synthetic_batch()
+    print(f"已构造对比实验批次，总共 {len(dataset)} 个测试条件。")
     
-    for idx, sample in enumerate(dataset):
-        print(f"\n正在处理样本 {idx}...")
+    for sample in dataset:
+        idx = sample["sample_id"]
+        cond_name = sample["condition_name"]
+        print(f"\n=======================================================")
+        print(f"正在处理样本 {idx} | 测试条件: 关注节点 '{cond_name}' ...")
+        print(f"=======================================================")
         
         # ==========================================================
         # ★★★ 彻底解决 OOM 的核心防护：规避 AnyRes 爆炸机制 ★★★
@@ -166,13 +179,13 @@ def main():
             axes[l, 0].text(-0.2, 0.5, f"L{l}", va='center', ha='right', transform=axes[l, 0].transAxes, fontsize=12)
 
         plt.subplots_adjust(wspace=0.1, hspace=0.1)
-        save_path = os.path.join(OUTPUT_DIR, f"layer_head_grid_sample_{idx}.png")
+        save_path = os.path.join(OUTPUT_DIR, f"layer_head_grid_sample_{idx}_target_{cond_name}.png")
         plt.savefig(save_path, dpi=100, bbox_inches='tight')
         plt.close(fig)
         print(f"全景图已保存: {save_path}")
 
         # 4. 把原始的 Numpy Tensor 保存下来，方便之后提取 2D 数组进行定量分析（比如计算落入左上角的比例）
-        tensor_path = os.path.join(OUTPUT_DIR, f"attn_tensor_sample_{idx}.npy")
+        tensor_path = os.path.join(OUTPUT_DIR, f"attn_tensor_sample_{idx}_target_{cond_name}.npy")
         np.save(tensor_path, attn_2d)
         print(f"原始特征矩阵(Shape: {num_layers}x{num_heads}x{grid_size}x{grid_size})已保存至: {tensor_path}")
         
