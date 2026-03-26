@@ -5,8 +5,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image, ImageDraw
 
-# 输出目录改为 output
-OUTPUT_DIR = r"d:\project\VLMEvalKit\output\probing_results"
+# 输出目录改为 Linux 服务器路径
+OUTPUT_DIR = r"/root/VLMEvalKit/outputs/probing_results"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 def generate_synthetic_batch(batch_size=3):
@@ -85,8 +85,9 @@ def extract_full_attention(model, processor, image, messages, target_word):
     return target_attn_tensor
 
 def main():
-    model_id = "llava-hf/llava-onevision-qwen2-7b-ov-hf"
-    print("Loading Model...")
+    # 直接加载本地在 /models/llava-ov-7b 下的模型权重
+    model_id = "/models/llava-ov-7b"
+    print(f"Loading Model from local path: {model_id} ...")
     try:
         processor = AutoProcessor.from_pretrained(model_id)
         model = LlavaOnevisionForConditionalGeneration.from_pretrained(model_id, device_map="auto", torch_dtype=torch.float16)
