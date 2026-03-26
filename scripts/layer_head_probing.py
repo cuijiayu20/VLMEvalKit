@@ -17,11 +17,13 @@ def generate_synthetic_batch():
     """
     dataset = []
     
-    # 1. 统一生成唯一个基准参照图：底图全白，仅在左上角有红色方块
+    # 1. 统一生成唯一个基准参照图：底图全白，仅在右下角有红色方块
     img = Image.new('RGB', (384, 384), color=(255, 255, 255))
     d = ImageDraw.Draw(img)
-    d.rectangle([10, 10, 120, 120], fill=(255, 0, 0))
-    path = os.path.join(OUTPUT_DIR, "synthetic_baseline_image.jpg")
+    # 将红块从左上角 [10, 10, 120, 120] 平移至右下角
+    # 384x384 画布的右下角，使用相似的 padding 和 长宽 (110x110)
+    d.rectangle([264, 264, 374, 374], fill=(255, 0, 0))
+    path = os.path.join(OUTPUT_DIR, "synthetic_baseline_image_BR.jpg")
     img.save(path)
     
     # 2. 构造三个对照组的变量条件 (Prompt 与 监测的目标 Token)
@@ -179,13 +181,13 @@ def main():
             axes[l, 0].text(-0.2, 0.5, f"L{l}", va='center', ha='right', transform=axes[l, 0].transAxes, fontsize=12)
 
         plt.subplots_adjust(wspace=0.1, hspace=0.1)
-        save_path = os.path.join(OUTPUT_DIR, f"layer_head_grid_sample_{idx}_target_{cond_name}.png")
+        save_path = os.path.join(OUTPUT_DIR, f"layer_head_grid_sample_{idx}_target_{cond_name}_BR.png")
         plt.savefig(save_path, dpi=100, bbox_inches='tight')
         plt.close(fig)
         print(f"全景图已保存: {save_path}")
 
         # 4. 把原始的 Numpy Tensor 保存下来，方便之后提取 2D 数组进行定量分析（比如计算落入左上角的比例）
-        tensor_path = os.path.join(OUTPUT_DIR, f"attn_tensor_sample_{idx}_target_{cond_name}.npy")
+        tensor_path = os.path.join(OUTPUT_DIR, f"attn_tensor_sample_{idx}_target_{cond_name}_BR.npy")
         np.save(tensor_path, attn_2d)
         print(f"原始特征矩阵(Shape: {num_layers}x{num_heads}x{grid_size}x{grid_size})已保存至: {tensor_path}")
         
